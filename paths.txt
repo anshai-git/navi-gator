@@ -1,2 +1,1 @@
-dotfiles::/test/path
-test::/test/path/1
+test2::/test/2
