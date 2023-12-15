@@ -68,7 +68,6 @@ impl Action {
 }
 
 fn main() -> io::Result<()> {
-    let mut change_directory: bool = false;
     let config_file_name: String = String::from("config.txt");
     let directory_path = match env::var("HOME") {
         Ok(home_path) => format!("{}/.config/navi-gator/", home_path),
