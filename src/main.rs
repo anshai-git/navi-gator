@@ -26,19 +26,17 @@ impl Finder for Vec<NavPath> {
 #[derive(Debug)]
 enum Action {
     LL,
-    LS,
     ADD,
     REMOVE,
     HELP,
 }
 
 impl Action {
-    const VALUES: [Self; 5] = [Self::LS, Self::LL, Self::ADD, Self::REMOVE, Self::HELP];
+    const VALUES: [Self; 4] = [Self::LL, Self::ADD, Self::REMOVE, Self::HELP];
 
     fn name(&self) -> String {
         match self {
             Action::LL => String::from("ll"),
-            Action::LS => String::from("ls"),
             Action::ADD => String::from("add"),
             Action::REMOVE => String::from("remove"),
             Action::HELP => String::from("help"),
@@ -47,7 +45,6 @@ impl Action {
 
     fn description(&self) -> String {
         match self {
-            Action::LS => String::from("List the available arguments."),
             Action::LL => String::from("List the available arguments with more info."),
             Action::ADD => String::from("Add new navigator item."),
             Action::REMOVE => String::from("Delete navigator item."),
@@ -58,7 +55,6 @@ impl Action {
     fn from_name(target: &String) -> Option<Action> {
         match target.as_str() {
             "ll" => Some(Action::LL),
-            "ls" => Some(Action::LS),
             "add" => Some(Action::ADD),
             "remove" => Some(Action::REMOVE),
             "help" => Some(Action::HELP),
@@ -110,11 +106,8 @@ fn main() -> io::Result<()> {
         let arg: String = args().nth(1).unwrap();
         if let Some(ca) = Action::from_name(&arg) {
             match ca {
-                Action::LS => {
-                    print_paths_short(&paths);
-                }
                 Action::LL => {
-                    print_paths_long(&paths);
+                    print_paths(&paths);
                 }
                 Action::ADD => {
                     add_path(&mut file, &mut paths);
@@ -211,13 +204,7 @@ fn add_path(file: &mut File, paths: &mut Vec<NavPath>) -> io::Result<()> {
     Ok(())
 }
 
-fn print_paths_short(paths: &Vec<NavPath>) -> () {
-    for p in paths {
-        eprint!("{:10} ", p.name);
-    }
-}
-
-fn print_paths_long(paths: &Vec<NavPath>) -> () {
+fn print_paths(paths: &Vec<NavPath>) -> () {
     for p in paths {
         eprintln!("{:10} :: {}", p.name, p.path);
     }
