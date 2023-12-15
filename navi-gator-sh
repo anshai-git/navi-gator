@@ -1,0 +1,12 @@
+#!/bin/sh
+
+output=$(navi-gator "$@")
+stat=$?
+
+if [ $stat -eq 0 ]; then
+  filtered_result=$(echo "$output" | grep "CHANGE_DIR")
+  if [ -n "$filtered_result" ]; then
+    new_directory_path=$(echo "$filtered_result" | awk '{print $2}')
+    cd "$new_directory_path"
+  fi
+fi

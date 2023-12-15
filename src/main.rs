@@ -1,22 +1,20 @@
 #![allow(warnings)]
 
 use std::{
-    env::args,
-    fs::{File, OpenOptions},
+    env::{self, args},
+    fs::{self, create_dir_all, File, OpenOptions},
     io::{self, BufRead, BufReader, Seek, SeekFrom, Write},
     process::exit,
 };
 
-static PATHS_FILE: &str = "paths.txt";
+trait Finder {
+    fn find(&self, target: &String) -> Option<&NavPath>;
+}
 
 #[derive(Debug)]
 struct NavPath {
     name: String,
     path: String,
-}
-
-trait Finder {
-    fn find(&self, target: &String) -> Option<&NavPath>;
 }
 
 impl Finder for Vec<NavPath> {
@@ -25,20 +23,78 @@ impl Finder for Vec<NavPath> {
     }
 }
 
+#[derive(Debug)]
+enum Action {
+    LL,
+    LS,
+    ADD,
+    REMOVE,
+    HELP,
+}
+
+impl Action {
+    const VALUES: [Self; 5] = [Self::LS, Self::LL, Self::ADD, Self::REMOVE, Self::HELP];
+
+    fn name(&self) -> String {
+        match self {
+            Action::LL => String::from("ll"),
+            Action::LS => String::from("ls"),
+            Action::ADD => String::from("add"),
+            Action::REMOVE => String::from("remove"),
+            Action::HELP => String::from("help"),
+        }
+    }
+
+    fn description(&self) -> String {
+        match self {
+            Action::LS => String::from("List the available arguments."),
+            Action::LL => String::from("List the available arguments with more info."),
+            Action::ADD => String::from("Add new navigator item."),
+            Action::REMOVE => String::from("Delete navigator item."),
+            Action::HELP => String::from("Print usage."),
+        }
+    }
+
+    fn from_name(target: &String) -> Option<Action> {
+        match target.as_str() {
+            "ll" => Some(Action::LL),
+            "ls" => Some(Action::LS),
+            "add" => Some(Action::ADD),
+            "remove" => Some(Action::REMOVE),
+            "help" => Some(Action::HELP),
+            _ => None,
+        }
+    }
+}
+
 fn main() -> io::Result<()> {
+    let mut change_directory: bool = false;
+    let config_file_name: String = String::from("config.txt");
+    let directory_path = match env::var("HOME") {
+        Ok(home_path) => format!("{}/.config/navi-gator/", home_path),
+        Err(_) => {
+            eprintln!("Failed to read home directory.");
+            exit(0)
+        }
+    };
+
+    if let Err(e) = create_dir_all(&directory_path) {
+        eprintln!("Error creating config directory: {}", e);
+    }
+
+    let config_path: String = format!("{}/{}", directory_path, config_file_name);
     let mut file: File = match OpenOptions::new()
         .read(true)
         .write(true)
         .create(true)
-        .open(PATHS_FILE)
+        .open(config_path)
     {
         Ok(content) => content,
         Err(_) => {
             eprintln!("Failed to read file containg paths, the program will exit.");
-            exit(1);
+            exit(0)
         }
     };
-    // FIXME: Why do I need to clone this?
     let reader: BufReader<File> = BufReader::new(file.try_clone().unwrap());
 
     let mut paths: Vec<NavPath> = Vec::new();
@@ -51,59 +107,41 @@ fn main() -> io::Result<()> {
         paths.push(n_path);
     }
 
-    let mut result = "";
-    match args().count() {
-        2 => {
-            let arg: String = args().nth(1).unwrap();
-            match arg.as_str() {
-                "ls" => {
+    if args().count() > 1 {
+        let arg: String = args().nth(1).unwrap();
+        if let Some(ca) = Action::from_name(&arg) {
+            match ca {
+                Action::LS => {
                     print_paths_short(&paths);
                 }
-                "ll" => {
+                Action::LL => {
                     print_paths_long(&paths);
                 }
-                _ => {
-                    // TODO: try to navigate to the path under the name arg
-                    if let Some(p) = paths.find(&arg) {
-                        result = p.path.as_str();
-                    } else {
-                        eprintln!("Invalid arguments.");
-                        print_usage();
-                        exit(1);
-                    }
+                Action::ADD => {
+                    add_path(&mut file, &mut paths);
                 }
-            }
-        }
-        3 => {
-            let arg: String = args().nth(1).unwrap();
-            match arg.as_str() {
-                "clear" => clear_path(&mut file, &mut paths)?,
-                _ => {
-                    eprintln!("Invalid arguments.");
+                Action::REMOVE => {
+                    clear_path(&mut file, &mut paths);
+                }
+                Action::HELP => {
                     print_usage();
-                    exit(1);
                 }
-            }
+            };
+            exit(0)
         }
-        4 => {
-            let arg: String = args().nth(1).unwrap();
-            match arg.as_str() {
-                "add" => add_path(&mut file, &mut paths)?,
-                _ => {
-                    eprintln!("Invalid arguments.");
-                    print_usage();
-                    exit(1);
-                }
-            }
-        }
-        _ => {
-            eprintln!("Invalid number of arguments.");
-            print_usage();
-            exit(1);
-        }
-    }
 
-    println!("{}", result);
+        if let Some(to_path) = paths.find(&arg) {
+            println!("CHANGE_DIR {}", to_path.path.as_str());
+            exit(0)
+        } else {
+            eprintln!("Invalid arguments.");
+            print_usage();
+            exit(0)
+        }
+    } else {
+        eprintln!("Invalid arguments.");
+        print_usage();
+    }
 
     Ok(())
 }
@@ -119,6 +157,8 @@ fn clear_path(file: &mut File, paths: &mut Vec<NavPath>) -> io::Result<()> {
         file.seek(SeekFrom::Start(0));
         file.set_len(0);
         file.write_all(new_content.as_bytes());
+
+        println!("Successfully removed {}", target);
     } else {
         print_usage();
     }
@@ -126,18 +166,43 @@ fn clear_path(file: &mut File, paths: &mut Vec<NavPath>) -> io::Result<()> {
 }
 
 fn add_path(file: &mut File, paths: &mut Vec<NavPath>) -> io::Result<()> {
-    if let Some(name) = args().nth(2) {
-        if let Some(path) = args().nth(3) {
-            paths.push(NavPath { name, path });
+    if let Some(name_arg) = args().nth(2) {
+        if let Some(existing) = paths.iter().find(|p| p.name == name_arg) {
+            println!(
+                "A navigator path with tha name: '{}' already exists for the path: '{}'",
+                existing.name, existing.path
+            );
+            exit(0);
+        }
 
-            let mut new_content: String = String::new();
-            for p in paths {
-                new_content.push_str(format!("{}::{}\n", p.name, p.path).as_str());
+        if let Some(path_arg) = args().nth(3) {
+            if let Err(e) = fs::metadata(&path_arg) {
+                eprintln!("The path provided: '{}' doesn't exist.", path_arg);
+                print_usage();
+                exit(1);
             }
+
+            let name = name_arg;
+            let path: String = match path_arg.as_str() {
+                "." => env::current_dir().unwrap().to_str().unwrap().to_string(),
+                _ => path_arg,
+            };
+
+            paths.push(NavPath {
+                name: name.clone(),
+                path: path.clone(),
+            });
+            let mut new_content: String = paths
+                .iter()
+                .map(|p| format!("{}::{}\n", p.name, p.path))
+                .collect::<Vec<_>>()
+                .join("");
 
             file.seek(SeekFrom::Start(0));
             file.set_len(0);
             file.write_all(new_content.as_bytes());
+
+            println!("Successfully added {} pointing to: {}", name, path);
         } else {
             print_usage();
         }
@@ -149,17 +214,19 @@ fn add_path(file: &mut File, paths: &mut Vec<NavPath>) -> io::Result<()> {
 
 fn print_paths_short(paths: &Vec<NavPath>) -> () {
     for p in paths {
-        print!("{} ", p.name);
+        eprint!("{:10} ", p.name);
     }
 }
 
 fn print_paths_long(paths: &Vec<NavPath>) -> () {
     for p in paths {
-        println!("{} :: {}", p.name, p.path);
+        eprintln!("{:10} :: {}", p.name, p.path);
     }
 }
 
 fn print_usage() -> () {
-    // TODO: implement usage printing
-    println!("Usage: ...");
+    eprintln!("Usage:");
+    for a in Action::VALUES {
+        eprintln!("{:10} - {}", a.name(), a.description());
+    }
 }
