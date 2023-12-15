@@ -6,7 +6,7 @@
 1. Clone the repo
 2. `sudo ./install.sh`
 3. Add the following function to .bashrc
-`sh
+`
     nav() {
       . navi-gator-sh
     }
