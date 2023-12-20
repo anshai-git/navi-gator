@@ -27,17 +27,19 @@ impl Finder for Vec<NavPath> {
 enum Action {
     LL,
     ADD,
+    CLEAN,
     REMOVE,
     HELP,
 }
 
 impl Action {
-    const VALUES: [Self; 4] = [Self::LL, Self::ADD, Self::REMOVE, Self::HELP];
+    const VALUES: [Self; 5] = [Self::LL, Self::ADD, Self::REMOVE, Self::CLEAN, Self::HELP];
 
     fn name(&self) -> String {
         match self {
             Action::LL => String::from("ll"),
             Action::ADD => String::from("add"),
+            Action::CLEAN => String::from("clean"),
             Action::REMOVE => String::from("remove"),
             Action::HELP => String::from("help"),
         }
@@ -47,15 +49,16 @@ impl Action {
         match self {
             Action::LL => String::from("List the available arguments with more info."),
             Action::ADD => String::from("Add new navigator item."),
+            Action::CLEAN => String::from("Delete all navigation items"),
             Action::REMOVE => String::from("Delete navigator item."),
-            Action::HELP => String::from("Print usage."),
-        }
+            Action::HELP => String::from("Print usage."), }
     }
 
     fn from_name(target: &String) -> Option<Action> {
         match target.as_str() {
             "ll" => Some(Action::LL),
             "add" => Some(Action::ADD),
+            "clean" => Some(Action::CLEAN),
             "remove" => Some(Action::REMOVE),
             "help" => Some(Action::HELP),
             _ => None,
@@ -112,6 +115,9 @@ fn main() -> io::Result<()> {
                 Action::ADD => {
                     add_path(&mut file, &mut paths);
                 }
+                Action::CLEAN => {
+                    delete_all(&mut file);
+                }
                 Action::REMOVE => {
                     clear_path(&mut file, &mut paths);
                 }
@@ -136,6 +142,10 @@ fn main() -> io::Result<()> {
     }
 
     Ok(())
+}
+
+fn delete_all(file: &mut File) -> () {
+    file.set_len(0);
 }
 
 fn clear_path(file: &mut File, paths: &mut Vec<NavPath>) -> io::Result<()> {
@@ -205,6 +215,11 @@ fn add_path(file: &mut File, paths: &mut Vec<NavPath>) -> io::Result<()> {
 }
 
 fn print_paths(paths: &Vec<NavPath>) -> () {
+    if paths.is_empty() {
+        println!("You have no navigation paths yet.");
+        print_usage();
+    }
+
     for p in paths {
         eprintln!("{:10} :: {}", p.name, p.path);
     }
