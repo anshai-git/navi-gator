@@ -1,11 +1,10 @@
 #![allow(warnings)]
 
 use std::{
-    env::{self, args},
-    fs::{self, create_dir_all, File, OpenOptions},
-    io::{self, BufRead, BufReader, Seek, SeekFrom, Write},
-    process::exit,
+    any::Any, env::{self, args}, fs::{self, create_dir_all, File, OpenOptions}, io::{self, BufRead, BufReader, Seek, SeekFrom, Write}, process::exit
 };
+
+use clap::{command, Arg, ArgAction, ArgMatches, Args};
 
 trait Finder {
     fn find(&self, target: &String) -> Option<&NavPath>;
@@ -51,7 +50,8 @@ impl Action {
             Action::ADD => String::from("Add new navigator item."),
             Action::CLEAN => String::from("Delete all navigation items"),
             Action::REMOVE => String::from("Delete navigator item."),
-            Action::HELP => String::from("Print usage."), }
+            Action::HELP => String::from("Print usage."),
+        }
     }
 
     fn from_name(target: &String) -> Option<Action> {
@@ -67,7 +67,51 @@ impl Action {
 }
 
 fn main() -> io::Result<()> {
-    let config_file_name: String = String::from("config.txt");
+    let mut command = command!()
+        .arg(
+            Arg::new("list options")
+                .id("list")
+                .short('l')
+                .long("list")
+                .help("Print available navigator paths")
+                .required(false)
+                .action(ArgAction::SetTrue)
+                .conflicts_with_all(&["purge", "add", "remove"]),
+        )
+        .arg(
+            Arg::new("purge")
+                .id("purge")
+                .long("purge")
+                .help("Delete all navigator paths")
+                .required(false)
+                .action(ArgAction::SetTrue)
+                .conflicts_with_all(&["list", "add", "remove"]),
+        )
+        .arg(
+            Arg::new("add item")
+                .id("add")
+                .short('a')
+                .long("add")
+                .help("Add new navigator item")
+                .required(false)
+                .num_args(2)
+                .value_names(&["item_name", "item_path"])
+                .conflicts_with_all(&["list", "purge", "remove"]),
+        )
+        .arg(
+            Arg::new("Remove item")
+                .id("remove")
+                .short('r')
+                .long("remove")
+                .help("Delete navigator item by name")
+                .required(false)
+                .value_name("name")
+                .conflicts_with_all(&["list", "purge", "add"]),
+        );
+
+        let matches = command.get_matches();
+
+    let config_file_name: String = String::from("navi_gator.cfg");
     let directory_path = match env::var("HOME") {
         Ok(home_path) => format!("{}/.config/navi-gator/", home_path),
         Err(_) => {
@@ -105,41 +149,19 @@ fn main() -> io::Result<()> {
         paths.push(n_path);
     }
 
-    if args().count() > 1 {
-        let arg: String = args().nth(1).unwrap();
-        if let Some(ca) = Action::from_name(&arg) {
-            match ca {
-                Action::LL => {
-                    print_paths(&paths);
-                }
-                Action::ADD => {
-                    add_path(&mut file, &mut paths);
-                }
-                Action::CLEAN => {
-                    delete_all(&mut file);
-                }
-                Action::REMOVE => {
-                    clear_path(&mut file, &mut paths);
-                }
-                Action::HELP => {
-                    print_usage();
-                }
-            };
-            exit(0)
-        }
+    let match_list: &bool = matches.get_one::<bool>("list").unwrap();
+    let match_purge: &bool = matches.get_one::<bool>("purge").unwrap();
 
-        if let Some(to_path) = paths.find(&arg) {
-            println!("CHANGE_DIR {}", to_path.path.as_str());
-            exit(0)
-        } else {
-            eprintln!("Invalid arguments.");
-            print_usage();
-            exit(0)
-        }
-    } else {
-        eprintln!("Invalid arguments.");
-        print_usage();
+    let match_remove = matches.get_one::<String>("remove");
+    let match_add = matches.get_one::<String>("add");
+
+    if *match_list {
+        print_paths(&paths);
     }
+
+    println!("purge {:?}", match_purge);
+    println!("remove {:?}", match_remove);
+    println!("remove {:?}", match_add);
 
     Ok(())
 }
@@ -162,7 +184,7 @@ fn clear_path(file: &mut File, paths: &mut Vec<NavPath>) -> io::Result<()> {
 
         println!("Successfully removed {}", target);
     } else {
-        print_usage();
+        // print_usage();
     }
     Ok(())
 }
@@ -180,7 +202,7 @@ fn add_path(file: &mut File, paths: &mut Vec<NavPath>) -> io::Result<()> {
         if let Some(path_arg) = args().nth(3) {
             if let Err(e) = fs::metadata(&path_arg) {
                 eprintln!("The path provided: '{}' doesn't exist.", path_arg);
-                print_usage();
+                // print_usage();
                 exit(1);
             }
 
@@ -206,10 +228,10 @@ fn add_path(file: &mut File, paths: &mut Vec<NavPath>) -> io::Result<()> {
 
             println!("Successfully added {} pointing to: {}", name, path);
         } else {
-            print_usage();
+            // print_usage();
         }
     } else {
-        print_usage();
+        // print_usage();
     }
     Ok(())
 }
@@ -217,17 +239,9 @@ fn add_path(file: &mut File, paths: &mut Vec<NavPath>) -> io::Result<()> {
 fn print_paths(paths: &Vec<NavPath>) -> () {
     if paths.is_empty() {
         println!("You have no navigation paths yet.");
-        print_usage();
     }
 
     for p in paths {
         eprintln!("{:10} :: {}", p.name, p.path);
-    }
-}
-
-fn print_usage() -> () {
-    eprintln!("Usage:");
-    for a in Action::VALUES {
-        eprintln!("{:10} - {}", a.name(), a.description());
     }
 }
