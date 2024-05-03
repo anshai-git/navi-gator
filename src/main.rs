@@ -1,14 +1,14 @@
 #![allow(warnings)]
 
 use std::{
-    any::Any, env::{self, args}, fs::{self, create_dir_all, File, OpenOptions}, io::{self, BufRead, BufReader, Seek, SeekFrom, Write}, process::exit
+    any::Any,
+    env::{self, args},
+    fs::{self, create_dir_all, File, OpenOptions},
+    io::{self, BufRead, BufReader, Seek, SeekFrom, Write},
+    process::exit,
 };
 
-use clap::{command, Arg, ArgAction, ArgMatches, Args};
-
-trait Finder {
-    fn find(&self, target: &String) -> Option<&NavPath>;
-}
+use clap::{command, parser::ValuesRef, value_parser, Arg, ArgAction, ArgMatches, Args, Command};
 
 #[derive(Debug)]
 struct NavPath {
@@ -16,58 +16,48 @@ struct NavPath {
     path: String,
 }
 
-impl Finder for Vec<NavPath> {
-    fn find(&self, target: &String) -> Option<&NavPath> {
-        self.iter().find(|e| e.name == target.as_str())
-    }
-}
-
-#[derive(Debug)]
-enum Action {
-    LL,
-    ADD,
-    CLEAN,
-    REMOVE,
-    HELP,
-}
-
-impl Action {
-    const VALUES: [Self; 5] = [Self::LL, Self::ADD, Self::REMOVE, Self::CLEAN, Self::HELP];
-
-    fn name(&self) -> String {
-        match self {
-            Action::LL => String::from("ll"),
-            Action::ADD => String::from("add"),
-            Action::CLEAN => String::from("clean"),
-            Action::REMOVE => String::from("remove"),
-            Action::HELP => String::from("help"),
-        }
-    }
-
-    fn description(&self) -> String {
-        match self {
-            Action::LL => String::from("List the available arguments with more info."),
-            Action::ADD => String::from("Add new navigator item."),
-            Action::CLEAN => String::from("Delete all navigation items"),
-            Action::REMOVE => String::from("Delete navigator item."),
-            Action::HELP => String::from("Print usage."),
-        }
-    }
-
-    fn from_name(target: &String) -> Option<Action> {
-        match target.as_str() {
-            "ll" => Some(Action::LL),
-            "add" => Some(Action::ADD),
-            "clean" => Some(Action::CLEAN),
-            "remove" => Some(Action::REMOVE),
-            "help" => Some(Action::HELP),
-            _ => None,
-        }
-    }
-}
-
 fn main() -> io::Result<()> {
-    let mut command = command!()
+    let mut command = parse_args();
+    let matches = command.clone().get_matches();
+    
+    let mut paths: Vec<NavPath> = Vec::new();
+    let mut file: File = open_config_file();
+
+    load_paths(&mut paths, &file);
+
+    /// ArgMatches::contains_id returns 'true' if default_value has been set
+    /// ArgActions::SetTrue implies default_value 'false'
+    if *matches.get_one::<bool>("list").unwrap() {
+        print_paths(&paths);
+    }
+
+    if *matches.get_one::<bool>("purge").unwrap() {
+        delete_all(&mut file);
+    }
+
+    if let Some(target) = matches.get_one::<String>("remove") {
+        clear_path(&mut file, &mut paths, target);
+    }
+
+    if matches.contains_id("add") {
+        let values: Vec<String> = matches
+            .get_many("add")
+            .expect("expect the unexpected")
+            .cloned()
+            .collect();
+
+        let name: &String = values.get(0).unwrap();
+        let path: &String = values.get(1).unwrap();
+
+        add_path(&mut file, &mut paths, name, path);
+    }
+
+    Ok(())
+}
+
+fn parse_args() -> Command {
+    command!()
+        .arg_required_else_help(true)
         .arg(
             Arg::new("list options")
                 .id("list")
@@ -93,7 +83,8 @@ fn main() -> io::Result<()> {
                 .short('a')
                 .long("add")
                 .help("Add new navigator item")
-                .required(false)
+                .action(ArgAction::Append)
+                .value_parser(value_parser!(String))
                 .num_args(2)
                 .value_names(&["item_name", "item_path"])
                 .conflicts_with_all(&["list", "purge", "remove"]),
@@ -107,10 +98,22 @@ fn main() -> io::Result<()> {
                 .required(false)
                 .value_name("name")
                 .conflicts_with_all(&["list", "purge", "add"]),
-        );
+        )
+}
 
-        let matches = command.get_matches();
+fn load_paths(paths: &mut Vec<NavPath>, file: &File) {
+    let reader: BufReader<File> = BufReader::new(file.try_clone().unwrap());
+    for line in reader.lines().flatten() {
+        let parts: Vec<String> = line.split("::").map(String::from).collect();
+        let n_path = NavPath {
+            name: parts.get(0).unwrap().to_string(),
+            path: parts.get(1).unwrap().to_string(),
+        };
+        paths.push(n_path);
+    }
+}
 
+fn open_config_file() -> File {
     let config_file_name: String = String::from("navi_gator.cfg");
     let directory_path = match env::var("HOME") {
         Ok(home_path) => format!("{}/.config/navi-gator/", home_path),
@@ -124,115 +127,86 @@ fn main() -> io::Result<()> {
         eprintln!("Error creating config directory: {}", e);
     }
 
-    let config_path: String = format!("{}/{}", directory_path, config_file_name);
-    let mut file: File = match OpenOptions::new()
+    let path: String = format!("{}/{}", directory_path, config_file_name);
+
+    match OpenOptions::new()
         .read(true)
         .write(true)
         .create(true)
-        .open(config_path)
+        .open(path)
     {
         Ok(content) => content,
         Err(_) => {
             eprintln!("Failed to read file containg paths, the program will exit.");
             exit(0)
         }
-    };
-    let reader: BufReader<File> = BufReader::new(file.try_clone().unwrap());
-
-    let mut paths: Vec<NavPath> = Vec::new();
-    for line in reader.lines().flatten() {
-        let parts: Vec<String> = line.split("::").map(String::from).collect();
-        let n_path = NavPath {
-            name: parts.get(0).unwrap().to_string(),
-            path: parts.get(1).unwrap().to_string(),
-        };
-        paths.push(n_path);
     }
-
-    let match_list: &bool = matches.get_one::<bool>("list").unwrap();
-    let match_purge: &bool = matches.get_one::<bool>("purge").unwrap();
-
-    let match_remove = matches.get_one::<String>("remove");
-    let match_add = matches.get_one::<String>("add");
-
-    if *match_list {
-        print_paths(&paths);
-    }
-
-    println!("purge {:?}", match_purge);
-    println!("remove {:?}", match_remove);
-    println!("remove {:?}", match_add);
-
-    Ok(())
 }
 
+/// Delete all the navigation paths
+/// This also deletes them from the config file
 fn delete_all(file: &mut File) -> () {
     file.set_len(0);
 }
 
-fn clear_path(file: &mut File, paths: &mut Vec<NavPath>) -> io::Result<()> {
-    if let Some(target) = args().nth(2) {
-        let mut new_content: String = String::new();
+/// Deletes the single navigator path which matches the name under 'target'
+fn clear_path(file: &mut File, paths: &mut Vec<NavPath>, target: &String) -> io::Result<()> {
+    let mut new_content: String = String::new();
 
-        for p in paths.iter().filter(|p| p.name != target) {
-            new_content.push_str(format!("{}::{}\n", p.name, p.path).as_str());
-        }
-
-        file.seek(SeekFrom::Start(0));
-        file.set_len(0);
-        file.write_all(new_content.as_bytes());
-
-        println!("Successfully removed {}", target);
-    } else {
-        // print_usage();
+    for p in paths.iter().filter(|p| p.name != *target) {
+        new_content.push_str(format!("{}::{}\n", p.name, p.path).as_str());
     }
+
+    file.seek(SeekFrom::Start(0));
+    file.set_len(0);
+    file.write_all(new_content.as_bytes());
+
+    println!("Successfully removed {}", target);
     Ok(())
 }
 
-fn add_path(file: &mut File, paths: &mut Vec<NavPath>) -> io::Result<()> {
-    if let Some(name_arg) = args().nth(2) {
-        if let Some(existing) = paths.iter().find(|p| p.name == name_arg) {
-            println!(
-                "A navigator path with tha name: '{}' already exists for the path: '{}'",
-                existing.name, existing.path
-            );
-            exit(0);
-        }
-
-        if let Some(path_arg) = args().nth(3) {
-            if let Err(e) = fs::metadata(&path_arg) {
-                eprintln!("The path provided: '{}' doesn't exist.", path_arg);
-                // print_usage();
-                exit(1);
-            }
-
-            let name = name_arg;
-            let path: String = match path_arg.as_str() {
-                "." => env::current_dir().unwrap().to_str().unwrap().to_string(),
-                _ => path_arg,
-            };
-
-            paths.push(NavPath {
-                name: name.clone(),
-                path: path.clone(),
-            });
-            let mut new_content: String = paths
-                .iter()
-                .map(|p| format!("{}::{}\n", p.name, p.path))
-                .collect::<Vec<_>>()
-                .join("");
-
-            file.seek(SeekFrom::Start(0));
-            file.set_len(0);
-            file.write_all(new_content.as_bytes());
-
-            println!("Successfully added {} pointing to: {}", name, path);
-        } else {
-            // print_usage();
-        }
-    } else {
-        // print_usage();
+fn add_path(
+    file: &mut File,
+    paths: &mut Vec<NavPath>,
+    name: &String,
+    path: &String,
+) -> io::Result<()> {
+    if let Some(existing) = paths.iter().find(|p| p.name == *name) {
+        println!(
+            "A navigator path with tha name: '{}' already exists for the path: '{}'",
+            existing.name, existing.path
+        );
+        exit(0);
     }
+
+    let path: String = match path.as_str() {
+        "." |
+        "./" => env::current_dir().unwrap().to_str().unwrap().to_string(),
+        _ => path.clone(),
+    };
+
+    if let Err(e) = fs::metadata(&path) {
+        eprintln!("The path provided: '{}' doesn't exist.", path);
+        // print_usage();
+        exit(1);
+    }
+
+    paths.push(NavPath {
+        name: name.clone(),
+        path: path.clone(),
+    });
+
+    let mut new_content: String = paths
+        .iter()
+        .map(|p| format!("{}::{}\n", p.name, p.path))
+        .collect::<Vec<_>>()
+        .join("");
+
+    file.seek(SeekFrom::Start(0));
+    file.set_len(0);
+    file.write_all(new_content.as_bytes());
+
+    println!("Successfully added {} pointing to: {}", name, path);
     Ok(())
 }
 
