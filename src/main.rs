@@ -16,10 +16,20 @@ struct NavPath {
     path: String,
 }
 
+trait Finder {
+    fn find(&self, target: &String) -> Option<&NavPath>;
+}
+
+impl Finder for Vec<NavPath> {
+    fn find(&self, target: &String) -> Option<&NavPath> {
+        self.iter().find(|e| e.name == target.as_str())
+    }
+}
+
 fn main() -> io::Result<()> {
     let mut command = parse_args();
     let matches = command.clone().get_matches();
-    
+
     let mut paths: Vec<NavPath> = Vec::new();
     let mut file: File = open_config_file();
 
@@ -52,12 +62,26 @@ fn main() -> io::Result<()> {
         add_path(&mut file, &mut paths, name, path);
     }
 
+    if let Some(to_path) = matches.get_one::<String>("path_name").and_then(|path_name| paths.find(path_name)) {
+        println!("CHANGE_DIR {}", to_path.path.as_str());
+        exit(0)
+    } else {
+        command.print_help();
+    }
+
     Ok(())
 }
 
 fn parse_args() -> Command {
     command!()
         .arg_required_else_help(true)
+        .arg(
+            Arg::new("path name")
+                .id("path_name")
+                .required(false)
+                .help("Path name to navigate to")
+                .conflicts_with_all(&["list", "purge", "add", "remove"])
+        )
         .arg(
             Arg::new("list options")
                 .id("list")
@@ -66,7 +90,7 @@ fn parse_args() -> Command {
                 .help("Print available navigator paths")
                 .required(false)
                 .action(ArgAction::SetTrue)
-                .conflicts_with_all(&["purge", "add", "remove"]),
+                .conflicts_with_all(&["purge", "add", "remove", "path_name"]),
         )
         .arg(
             Arg::new("purge")
@@ -75,7 +99,7 @@ fn parse_args() -> Command {
                 .help("Delete all navigator paths")
                 .required(false)
                 .action(ArgAction::SetTrue)
-                .conflicts_with_all(&["list", "add", "remove"]),
+                .conflicts_with_all(&["list", "add", "remove", "path_name"]),
         )
         .arg(
             Arg::new("add item")
@@ -87,7 +111,7 @@ fn parse_args() -> Command {
                 .value_parser(value_parser!(String))
                 .num_args(2)
                 .value_names(&["item_name", "item_path"])
-                .conflicts_with_all(&["list", "purge", "remove"]),
+                .conflicts_with_all(&["list", "purge", "remove", "path_name"]),
         )
         .arg(
             Arg::new("Remove item")
@@ -97,7 +121,7 @@ fn parse_args() -> Command {
                 .help("Delete navigator item by name")
                 .required(false)
                 .value_name("name")
-                .conflicts_with_all(&["list", "purge", "add"]),
+                .conflicts_with_all(&["list", "purge", "add", "path_name"]),
         )
 }
 
@@ -180,8 +204,7 @@ fn add_path(
     }
 
     let path: String = match path.as_str() {
-        "." |
-        "./" => env::current_dir().unwrap().to_str().unwrap().to_string(),
+        "." | "./" => env::current_dir().unwrap().to_str().unwrap().to_string(),
         _ => path.clone(),
     };
 
